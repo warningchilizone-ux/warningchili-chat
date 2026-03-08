@@ -1,41 +1,42 @@
 export default async function handler(req, res) {
-
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS, GET");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
 
-  if (req.method !== "POST") {
+  if (req.method === "GET") {
     return res.status(200).json({
-      reply: "API:t fungerar. Skicka ett POST-anrop från chatten."
+      ok: true,
+      message: "GET fungerar"
+    });
+  }
+
+  if (req.method !== "POST") {
+    return res.status(405).json({
+      ok: false,
+      error: "Method not allowed"
     });
   }
 
   try {
-
-    const { message } = req.body;
+    const message = req.body?.message;
 
     if (!message) {
       return res.status(400).json({
-        reply: "Ingen fråga skickades."
+        ok: false,
+        error: "Ingen message skickades in"
       });
     }
 
-    const systemPrompt = `
-Du är chili-expert för Warningchilizone.
-
-Din uppgift är att hjälpa kunder välja rätt chilisås.
-
-Tänk på:
-- vad kunden vill laga
-- hur stark mat kunden gillar
-- rekommendera rätt produkt
-- håll svar korta och trevliga
-- skriv på svenska
-`;
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({
+        ok: false,
+        error: "OPENAI_API_KEY saknas i Vercel"
+      });
+    }
 
     const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -46,42 +47,37 @@ Tänk på:
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: message }
-        ],
-        temperature: 0.7
+          {
+            role: "system",
+            content: "Du är en hjälpsam chili-expert för Warningchilizone. Svara kort på svenska."
+          },
+          {
+            role: "user",
+            content: message
+          }
+        ]
       })
     });
 
     const data = await openaiRes.json();
 
     if (!openaiRes.ok) {
-      console.error("OpenAI error:", data);
-
-      const errorMessage =
-        data?.error?.message ||
-        data?.message ||
-        "OpenAI-anropet misslyckades.";
-
       return res.status(500).json({
-        reply: errorMessage
+        ok: false,
+        error: data?.error?.message || "OpenAI-anropet misslyckades",
+        full: data
       });
     }
 
-    const reply = data?.choices?.[0]?.message?.content;
-
     return res.status(200).json({
-      reply: reply || "Jag kunde inte svara just nu."
+      ok: true,
+      reply: data?.choices?.[0]?.message?.content || "Tomt svar från OpenAI",
+      raw: data
     });
-
-  } catch (error) {
-
-    console.error("Server error:", error);
-
+  } catch (err) {
     return res.status(500).json({
-      reply: "Serverfel i chatten."
+      ok: false,
+      error: err?.message || "Okänt serverfel"
     });
-
   }
-
 }
